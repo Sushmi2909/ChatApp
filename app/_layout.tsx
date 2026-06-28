@@ -1,24 +1,53 @@
-import { DarkTheme, DefaultTheme, ThemeProvider } from '@react-navigation/native';
-import { Stack } from 'expo-router';
-import { StatusBar } from 'expo-status-bar';
-import 'react-native-reanimated';
+import { Stack, useRouter } from 'expo-router';
+import { onAuthStateChanged } from 'firebase/auth';
+import { doc, serverTimestamp, updateDoc } from 'firebase/firestore';
+import { useEffect } from 'react';
+import { AppState } from 'react-native';
+import { auth, db } from '../firebase';
+import { registerForPushNotifications } from '../notifications';
 
-import { useColorScheme } from '@/hooks/use-color-scheme';
+export default function Layout() {
+    const router = useRouter()
 
-export const unstable_settings = {
-  anchor: '(tabs)',
-};
+    useEffect(() => {
+       const unsubscribeAuth = onAuthStateChanged(auth, async (user) => {
+            if (user) {
 
-export default function RootLayout() {
-  const colorScheme = useColorScheme();
+                router.replace('/chat' as any)
+                // register for push notifications
+                registerForPushNotifications()
 
-  return (
-    <ThemeProvider value={colorScheme === 'dark' ? DarkTheme : DefaultTheme}>
-      <Stack>
-        <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
-        <Stack.Screen name="modal" options={{ presentation: 'modal', title: 'Modal' }} />
-      </Stack>
-      <StatusBar style="auto" />
-    </ThemeProvider>
-  );
+                // set online when logged in
+                updateDoc(doc(db, 'users', user.uid), {
+                    online: true,
+                    lastSeen: serverTimestamp()
+                })
+
+                // track app state changes
+                const subscription = AppState.addEventListener('change', (state) => {
+                    if (state === 'active') {
+                        updateDoc(doc(db, 'users', user.uid), {
+                            online: true,
+                            lastSeen: serverTimestamp()
+                        })
+                    } else {
+                        updateDoc(doc(db, 'users', user.uid), {
+                            online: false,
+                            lastSeen: serverTimestamp()
+                        })
+                    }
+                })
+
+                return () => subscription.remove()
+            } else {
+                router.replace('/' as any)
+            }
+        })
+
+        return unsubscribeAuth
+    }, [])
+
+    return (
+        <Stack screenOptions={{ headerShown: false }} />
+    )
 }
